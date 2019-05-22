@@ -1,0 +1,217 @@
+REPORT ZSERKAN_P_TEMPLATE.
+
+
+TABLES: SSCRFIELDS,DD02L.
+TYPE-POOLS: TRUX.
+
+DATA: NAMETAB LIKE DNTAB OCCURS 0 WITH HEADER LINE.
+DATA: gt_tabname LIKE DD02L OCCURS 0 WITH HEADER LINE.
+
+DATA: BEGIN OF IT_DATA OCCURS 0.
+        INCLUDE STRUCTURE NAMETAB.
+DATA: SEL(1).
+DATA: END OF IT_DATA.
+
+
+DATA: GS_LAYO TYPE SLIS_LAYOUT_ALV,
+      GT_FCAT TYPE  SLIS_T_FIELDCAT_ALV,
+      GS_FCAT LIKE LINE OF GT_FCAT.
+
+DATA: BEGIN OF GT_HEADER OCCURS 0,
+        COLUMN_NAME(40),
+      END OF GT_HEADER.
+
+DATA:LV_FILENAME TYPE STRING,
+     LV_PATH     TYPE STRING,
+     LV_FULLPATH TYPE STRING.
+
+SELECTION-SCREEN: BEGIN OF BLOCK B1 WITH FRAME TITLE TEXT-001.
+PARAMETERS: P_TABLE     TYPE DNTAB-TABNAME OBLIGATORY,
+            P_FNAME RADIOBUTTON GROUP R1 DEFAULT 'X',
+            P_FTEXT RADIOBUTTON GROUP R1.
+SELECTION-SCREEN: END OF BLOCK B1.
+
+CONSTANTS:  C_EXT_XLS TYPE STRING VALUE '*.xls'.
+
+
+START-OF-SELECTION.
+  PERFORM GET_DATA.
+
+END-OF-SELECTION.
+  IF IT_DATA[] IS NOT INITIAL.
+    PERFORM FIELDCAT.
+    PERFORM BUILD_HEADER.
+    PERFORM GET_FILENAME.
+    PERFORM DOWN_EXCEL.
+  ELSE.
+    MESSAGE 'Kayıt bulunamadı!' TYPE 'S' DISPLAY LIKE 'E'.
+    EXIT.
+  ENDIF.
+
+
+*&---------------------------------------------------------------------*
+*&      Form  GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM GET_DATA .
+
+  SELECT SINGLE TABNAME FROM DD02L INTO GT_TABNAME
+    WHERE TABNAME = P_TABLE.
+
+  IF GT_TABNAME IS INITIAL.
+    MESSAGE 'Geçerli tablo adı giriniz!' TYPE 'S' DISPLAY LIKE 'E'.
+    exit.
+  ENDIF.
+
+  CALL FUNCTION 'NAMETAB_GET'
+    EXPORTING
+      LANGU   = SY-LANGU
+      TABNAME = P_TABLE
+    TABLES
+      NAMETAB = IT_DATA.
+  IF SY-SUBRC <> 0.
+* Implement suitable error handling here
+  ENDIF.
+  GS_LAYO-BOX_FIELDNAME = 'SEL'.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_FILENAME
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM GET_FILENAME .
+  CALL METHOD CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG
+    EXPORTING
+      WINDOW_TITLE         = 'Dosya Kayıt Yolu Seçiniz.'
+      DEFAULT_EXTENSION    = 'XLS'
+      FILE_FILTER          = 'Excel files (*.XLS)|*.XLS'
+    CHANGING
+      FILENAME             = LV_FILENAME
+      PATH                 = LV_PATH
+      FULLPATH             = LV_FULLPATH
+    EXCEPTIONS
+      CNTL_ERROR           = 1
+      ERROR_NO_GUI         = 2
+      NOT_SUPPORTED_BY_GUI = 3
+      OTHERS               = 4.
+  IF SY-SUBRC <> 0.
+    MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+          WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+    EXIT.
+  ENDIF.
+
+  IF LV_FULLPATH IS INITIAL .
+    EXIT.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_HEADER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM BUILD_HEADER.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      I_GRID_TITLE             = 'Alan seçiniz.'
+      I_STRUCTURE_NAME         = 'DNTAB'
+      i_callback_program       = sy-repid
+      I_SCREEN_START_COLUMN    = 10
+      I_SCREEN_START_LINE      = 20
+      I_SCREEN_END_COLUMN      = 100
+      I_SCREEN_END_LINE        = 40
+      IS_LAYOUT                = GS_LAYO
+      IT_FIELDCAT              = GT_FCAT
+*      I_CALLBACK_PF_STATUS_SET = 'SET_PF_STATUS'
+*      I_CALLBACK_USER_COMMAND  = 'USER_COMMAND'
+    TABLES
+      T_OUTTAB              = IT_DATA.
+  .
+  IF SY-SUBRC <> 0.
+    MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+            WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+  ENDIF.
+  IF SY-UCOMM eq '&AC1'.
+    MESSAGE 'İşleminiz iptal edilmiştir' TYPE 'S' DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+
+  REFRESH GT_HEADER.
+
+  IF P_FNAME EQ 'X'.
+     LOOP AT IT_DATA WHERE SEL = 'X'.
+    APPEND IT_DATA-FIELDNAME TO GT_HEADER.
+  ENDLOOP.
+  ELSEIF P_FTEXT EQ 'X'.
+      LOOP AT IT_DATA WHERE SEL = 'X'.
+    APPEND IT_DATA-FIELDTEXT TO GT_HEADER.
+  ENDLOOP.
+  ENDIF.
+
+
+ENDFORM.
+*
+*FORM set_pf_status USING ok_code TYPE slis_t_extab.
+*  SET PF-STATUS 'STATUS'. "se41 den standart statüsü kopyala
+*ENDFORM.
+*
+*FORM user_command USING r_ucomm LIKE sy-ucomm
+*                    rs_selfield TYPE slis_selfield.
+*  CASE r_ucomm.
+*    WHEN '&AC1'.
+*      LEAVE TO SCREEN 0.
+*  ENDCASE.
+*
+*ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DOWN_EXCEL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM DOWN_EXCEL .
+  CALL FUNCTION 'GUI_DOWNLOAD'
+    EXPORTING
+      FILENAME              = LV_FILENAME
+      FILETYPE              = 'ASC'
+      WRITE_FIELD_SEPARATOR = 'X'
+    TABLES
+      DATA_TAB              = NAMETAB
+      FIELDNAMES            = GT_HEADER.
+  IF SY-SUBRC <> 0.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  FIELDCAT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM FIELDCAT .
+
+  GS_FCAT-FIELDNAME   = 'FIELDNAME'.
+  GS_FCAT-COL_POS     = 1.
+  APPEND GS_FCAT TO GT_FCAT.
+  CLEAR  GS_FCAT.
+
+  GS_FCAT-FIELDNAME   = 'FIELDTEXT'.
+  GS_FCAT-COL_POS     = 2.
+  APPEND GS_FCAT TO GT_FCAT.
+  CLEAR  GS_FCAT.
+
+ENDFORM.
